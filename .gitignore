@@ -1,0 +1,34 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Virtual environment
+.venv/
+env/
+venv/
+ENV/
+
+# Datasets (Raw and Generated paired audio)
+datasets/
+data_full/
+data_test/
+*.wav
+
+# Temp directories & outputs
+test_input/
+test_output/
+
+# Logs & System artifacts
+*.log
+.gemini/
+
+# Model Checkpoints (Heavy binary files)
+models_full_run/
+models_smoke_test/
+*.h5
+*.tflite
+*.onnx

@@ -409,8 +409,10 @@ class DTLN_model():
 
         '''
         
-        # use the Adam optimizer with a clipnorm of 3
-        optimizerAdam = keras.optimizers.Adam(lr=self.lr, clipnorm=3.0)
+        try:
+            optimizerAdam = keras.optimizers.Adam(learning_rate=self.lr, clipnorm=3.0)
+        except TypeError:
+            optimizerAdam = keras.optimizers.Adam(lr=self.lr, clipnorm=3.0)
         # compile model with loss function
         self.model.compile(loss=self.lossWrapper(), optimizer=optimizerAdam)
         
@@ -536,14 +538,24 @@ class DTLN_model():
         early_stopping = EarlyStopping(monitor='val_loss', min_delta=0, 
             patience=10, verbose=0, mode='auto', baseline=None)
         # create model check pointer to save the best model
-        checkpointer = ModelCheckpoint(savePath+runName+'.h5',
-                                       monitor='val_loss',
-                                       verbose=1,
-                                       save_best_only=True,
-                                       save_weights_only=True,
-                                       mode='auto',
-                                       save_freq='epoch'
-                                       )
+        try:
+            checkpointer = ModelCheckpoint(savePath+runName+'.h5',
+                                           monitor='val_loss',
+                                           verbose=1,
+                                           save_best_only=True,
+                                           save_weights_only=True,
+                                           mode='auto',
+                                           save_freq='epoch'
+                                           )
+        except ValueError:
+            checkpointer = ModelCheckpoint(savePath+runName+'.weights.h5',
+                                           monitor='val_loss',
+                                           verbose=1,
+                                           save_best_only=True,
+                                           save_weights_only=True,
+                                           mode='auto',
+                                           save_freq='epoch'
+                                           )
 
         # calculate length of audio chunks in samples
         len_in_samples = int(np.fix(self.fs * self.len_samples / 
@@ -565,19 +577,29 @@ class DTLN_model():
         dataset_val = dataset_val.batch(self.batchsize, drop_remainder=True).repeat()
         # calculate number of validation steps
         steps_val = generator_val.total_samples//self.batchsize
-        # start the training of the model
-        self.model.fit(
-            x=dataset, 
-            batch_size=None,
-            steps_per_epoch=steps_train, 
-            epochs=self.max_epochs,
-            verbose=1,
-            validation_data=dataset_val,
-            validation_steps=steps_val, 
-            callbacks=[checkpointer, reduce_lr, csv_logger, early_stopping],
-            max_queue_size=50,
-            workers=4,
-            use_multiprocessing=True)
+        try:
+            self.model.fit(
+                x=dataset, 
+                batch_size=None,
+                steps_per_epoch=steps_train, 
+                epochs=self.max_epochs,
+                verbose=1,
+                validation_data=dataset_val,
+                validation_steps=steps_val, 
+                callbacks=[checkpointer, reduce_lr, csv_logger, early_stopping])
+        except TypeError:
+            self.model.fit(
+                x=dataset, 
+                batch_size=None,
+                steps_per_epoch=steps_train, 
+                epochs=self.max_epochs,
+                verbose=1,
+                validation_data=dataset_val,
+                validation_steps=steps_val, 
+                callbacks=[checkpointer, reduce_lr, csv_logger, early_stopping],
+                max_queue_size=50,
+                workers=1,
+                use_multiprocessing=False)
         # clear out garbage
         tf.keras.backend.clear_session()
 
