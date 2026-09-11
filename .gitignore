@@ -14,9 +14,12 @@ ENV/
 
 # Datasets (Raw and Generated paired audio)
 datasets/
+dataset/
+raw_data/
 data_full/
 data_test/
 *.wav
+*.tar.gz
 
 # Temp directories & outputs
 test_input/
