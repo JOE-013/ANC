@@ -1,0 +1,11 @@
+# Lightweight Python requirements for Raspberry Pi 5 DTLN TFLite Inference & Evaluation
+# Note: On Raspberry Pi OS (ARM64), system libraries must be installed before running pip install.
+# Refer to pi_deployment_guide.md for apt-get dependencies.
+
+tflite-runtime>=2.14.0
+numpy>=1.23.0
+scipy>=1.10.0
+soundfile>=0.12.1
+librosa>=0.10.0
+pystoi>=0.3.3
+pesq>=0.0.4

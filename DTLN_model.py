@@ -14,6 +14,7 @@ This code is licensed under the terms of the MIT-license.
 
 import os, fnmatch
 import tensorflow.keras as keras
+import keras.ops as ops
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Activation, Dense, LSTM, Dropout, \
     Lambda, Input, Multiply, Layer, Conv1D
@@ -24,6 +25,7 @@ import soundfile as sf
 from wavinfo import WavInfoReader
 from random import shuffle, seed
 import numpy as np
+
 
 
 
@@ -311,11 +313,11 @@ class DTLN_model():
         # creating the mask with a Dense and an Activation layer
         mask = Dense(mask_size)(x)
         mask = Activation(self.activation)(mask)
-        out_states_h = tf.reshape(tf.stack(states_h, axis=0), 
+        out_states_h = ops.reshape(ops.stack(states_h, axis=0), 
                                   [1,num_layer,self.numUnits])
-        out_states_c = tf.reshape(tf.stack(states_c, axis=0), 
+        out_states_c = ops.reshape(ops.stack(states_c, axis=0), 
                                   [1,num_layer,self.numUnits])
-        out_states = tf.stack([out_states_h, out_states_c], axis=-1)
+        out_states = ops.stack([out_states_h, out_states_c], axis=-1)
         # returning the mask and states
         return mask, out_states
 
