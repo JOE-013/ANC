@@ -66,8 +66,8 @@ def main():
     val_mix = r"d:\SIH 2026\DTLN\data_full\val_mix"
     val_speech = r"d:\SIH 2026\DTLN\data_full\val_speech"
 
-    verify_set(train_mix, train_speech, 680, label="Train")
-    verify_set(val_mix, val_speech, 120, label="Validation")
+    verify_set(train_mix, train_speech, 3570, label="Train")
+    verify_set(val_mix, val_speech, 630, label="Validation")
 
     print("\n--- DTLN_model.py audio_generator Compatibility ---")
     gen_train = audio_generator(train_mix, train_speech, len_of_samples=240000, fs=16000, train_flag=True)

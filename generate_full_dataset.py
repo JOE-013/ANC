@@ -60,6 +60,14 @@ def generate_pairs_set(speech_pool, noise_pool, out_noisy_dir, out_clean_dir, sn
     os.makedirs(out_noisy_dir, exist_ok=True)
     os.makedirs(out_clean_dir, exist_ok=True)
 
+    # Clear existing .wav files to ensure exact dataset count
+    for f in glob.glob(os.path.join(out_noisy_dir, "*.wav")):
+        try: os.remove(f)
+        except Exception: pass
+    for f in glob.glob(os.path.join(out_clean_dir, "*.wav")):
+        try: os.remove(f)
+        except Exception: pass
+
     min_samples = int(target_fs * target_duration)
     results = []
 
@@ -140,9 +148,9 @@ def main():
     random.shuffle(noise_pool)
 
     # 3. Parameters
-    snrs = [-5.0, 0.0, 5.0, 10.0, 15.0]
-    num_train = 680
-    num_val = 120
+    snrs = [-5.0, 0.0, 5.0, 10.0, 15.0, 20.0, 25.0]
+    num_train = 3570
+    num_val = 630
 
     print(f"\nGenerating {num_train} training pairs into data_full/train_* ...")
     train_res = generate_pairs_set(
@@ -160,7 +168,7 @@ def main():
         snrs=snrs, num_pairs=num_val, prefix="val"
     )
 
-    print(f"\nSuccessfully generated {len(train_res)} train pairs and {len(val_res)} val pairs (800 total pairs).")
+    print(f"\nSuccessfully generated {len(train_res)} train pairs and {len(val_res)} val pairs ({len(train_res) + len(val_res)} total pairs).")
 
 if __name__ == '__main__':
     main()

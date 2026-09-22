@@ -1,84 +1,89 @@
-# Active Noise Cancellation & Speech Enhancement with DTLN
+# Active Noise Cancellation & Real-Time Speech Enhancement with Scaled DTLN (256-Unit)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10](https://img.shields.io/badge/Python-3.10-blue.svg)](https://www.python.org/)
 [![TensorFlow 2.18+](https://img.shields.io/badge/TensorFlow-2.18%2B-orange.svg)](https://www.tensorflow.org/)
 [![Raspberry Pi 5](https://img.shields.io/badge/Raspberry%20Pi%205-ARM64-red.svg)](https://www.raspberrypi.com/)
+[![Real-Time Factor](https://img.shields.io/badge/RTF-0.0678x-brightgreen.svg)](#-benchmark-results)
 
-An end-to-end real-time speech enhancement and active noise cancellation (ANC) pipeline based on the **Dual-Signal Transformation LSTM Network (DTLN)** architecture, equipped with automated multi-dataset generation, hardware latency benchmarking, quantitative PESQ/STOI/SI-SNR evaluation, a classical non-ML transient limiter post-processor, and **Raspberry Pi 5 TFLite/LiteRT deployment packaging**.
+An end-to-end real-time speech enhancement and active noise cancellation (ANC) pipeline based on the **Dual-Signal Transformation LSTM Network (DTLN)** architecture scaled up to `numUnits=256`, `numLayer=1` (~1.45M parameters). Featuring automated multi-dataset synthesis, GPU acceleration on Google Colab, TFLite/LiteRT stateful streaming conversion, quantitative PESQ/STOI/SI-SNR evaluation, and real-time deployment on **Raspberry Pi 5**.
 
 ---
 
 ## 📋 Key Features & Highlights
 
-- **Lightweight Real-Time Architecture**: Stacked STFT + learned Conv1D analysis network with `numUnits=64` and `numLayer=1` (460,609 total parameters / 1.76 MB), designed for real-time block-by-block processing (32ms window, 8ms hop / 128 samples @ 16 kHz).
-- **Multi-Dataset Synthesis Pipeline**: Automated pairing script (`generate_full_dataset.py`) combining clean speech (**LibriSpeech `dev-clean`**) with 50 categories of environmental noise (**ESC-50**) and background noise/babble (**MUSAN**).
-- **Rigorous Data Integrity**: 100% disjoint speaker split between training (680 clips / 85%) and validation (120 clips / 15%), verified format (16kHz mono, 15.0s), and SNR spot-checking (`verify_full_dataset.py`).
-- **Production Training Loop**: Optimized training using plain **SI-SNR Loss** (`snr_cost`), batch size 16, `EarlyStopping(patience=10)`, and `ReduceLROnPlateau` learning rate decay.
-- **Quantitative Evaluation Suite**: Automated evaluation (`evaluate_full_run.py`) computing **wideband PESQ**, **STOI**, and **SI-SNR** across 120 held-out validation pairs.
-- **TFLite & LiteRT Conversion**: Export utility (`export_tflite_full_run.py`) separating the architecture into stateful frequency-domain (`model_1.tflite`) and time-domain (`model_2.tflite`) submodels.
-- **Raspberry Pi 5 Ready**: Dedicated deployment guide (`pi_deployment_guide.md`) and lightweight requirements (`requirements_pi.txt`) for offline batch evaluation on ARM64 hardware.
-- **Bolt-On Transient Limiter**: Classical short-window energy transient limiter (`transient_limiter.py`) with relative noise floor tracking, fast attack (2ms), and smooth release (50ms) to suppress residual impulse noise spikes.
+- **Scaled High-Capacity DTLN Architecture**: 2-stage stacked architecture combining STFT-domain mask estimation and learned time-domain Conv1D feature synthesis (`numUnits=256`, `numLayer=1`, 1,451,266 parameters).
+- **Ultra-Low Latency & High Real-Time Headroom**: Frame-by-frame block processing (512-sample STFT window, 128-sample hop size = **8.0 ms budget @ 16 kHz**). Achieves **0.543 ms per block** latency on Raspberry Pi 5 (**14.75x real-time speed**, **93.2% CPU headroom**).
+- **Robust Multi-Dataset Pipeline**: Automated synthesis script (`generate_full_dataset.py`) pairing clean speech (**LibriSpeech `dev-clean`**) with environmental noise (**ESC-50**, 50 categories) and background noise (**MUSAN**). Trained on 4,200 pairs across 7 SNR bands (-5, 0, 5, 10, 15, 20, 25 dB).
+- **Strict Data Integrity**: 100% disjoint speaker splits between training (3,570 pairs / 85%) and validation (630 pairs / 15%), verified 16 kHz mono format, and automated SNR verification (`verify_full_dataset.py`).
+- **Google Colab GPU Training Workflow**: Self-contained notebook builder (`build_colab_notebook.py`) and preconfigured notebook (`train_dtln_colab.ipynb`) for fast GPU training.
+- **Stateful TFLite / LiteRT Conversion**: Exporter script (`export_tflite_scaled_run.py`) splitting the architecture into stateful frequency-domain (`model_1.tflite`, 2.27 MB) and time-domain (`model_2.tflite`, 3.27 MB) submodels with carryover LSTM states (`[1, 1, 256, 2]`).
+- **Raspberry Pi 5 Verified**: Complete step-by-step ARM64 deployment guide (`pi_deployment_guide_scaled.md`) and lightweight requirements (`requirements_pi.txt`).
+- **Live Real-Time Audio Streaming**: Direct microphone/speaker real-time processing via `real_time_processing_tf_lite.py`.
 
 ---
 
 ## 📊 Benchmark Results
 
-### 1. Quantitative Quality Evaluation (120 Held-Out Validation Files)
+### 1. Raspberry Pi 5 Measured Performance (256-Unit Model)
 
-| Evaluation Stage | SI-SNR (dB) | STOI | PESQ (wideband) | Key Observations |
+| Metric | Baseline Noisy | 64u Model (Previous) | **256u Scaled Model (Current)** | Improvement over 64u |
 | :--- | :--- | :--- | :--- | :--- |
-| **Noisy Reference** | 5.02 dB | 0.8059 | 1.356 | Raw input across 5 SNR levels (-5 to 15 dB) |
-| **Full-Run Keras .h5 Model** | **8.68 dB (+3.66 dB)** | **0.8414 (+0.0355)** | **1.589 (+0.233)** | **+3.66 dB SI-SNR gain & PESQ improvement across all SNR levels** |
-| **TFLite / LiteRT Engine** | **8.67 dB (+3.65 dB)** | **0.8414 (+0.0355)** | **1.589 (+0.233)** | **Identical output quality; zero degradation from TFLite conversion** |
+| **SI-SNR (After)** | 5.00 dB | 8.56 dB | **11.26 dB** | **+2.70 dB Gain** 🚀 |
+| **STOI (After)** | 0.8349 | 0.8283 | **0.8553** | **+0.0270 Gain** 🚀 |
+| **PESQ (After)** | 1.475 | 1.509 | **1.782** | **+0.273 Gain** 🚀 |
+| **Avg Block Latency** | — | 0.208 ms | **0.543 ms** | +0.335 ms |
+| **Real-Time Factor (RTF)**| — | 0.0260x | **0.0678x** | **14.75x Faster than Real-Time** |
+| **Latency Budget Headroom**| — | 7.792 ms | **7.457 ms (93.2%)** | Well within 8.0 ms budget |
 
-### 2. Validation Breakdown by Input SNR Condition (TFLite Engine)
+---
 
-| Input SNR Condition | SI-SNR Before | SI-SNR After | SI-SNR Gain | STOI Before | STOI After | PESQ Before | PESQ After | Avg Block Latency | Real-Time Factor (RTF) |
+### 2. Raspberry Pi 5 Breakdown by Input SNR Level (120 Validation Files)
+
+| Input SNR | Files | SI-SNR Before | SI-SNR After | STOI Before | STOI After | PESQ Before | PESQ After | Block Latency | Real-Time Factor |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **-5.0 dB** | -4.98 dB | **2.87 dB** | **+7.85 dB** | 0.6047 | **0.6865** | 1.096 | **1.258** | 0.135 ms | 0.0169x |
-| **0.0 dB** | 0.01 dB | **5.92 dB** | **+5.91 dB** | 0.7288 | **0.7915** | 1.157 | **1.393** | 0.139 ms | 0.0173x |
-| **5.0 dB** | 5.03 dB | **9.47 dB** | **+4.44 dB** | 0.8354 | **0.8659** | 1.267 | **1.579** | 0.137 ms | 0.0172x |
-| **10.0 dB** | 10.02 dB | **11.75 dB** | **+1.73 dB** | 0.9080 | **0.9160** | 1.480 | **1.761** | 0.134 ms | 0.0168x |
-| **15.0 dB** | 15.01 dB | **13.34 dB** | **-1.67 dB** | 0.9525 | 0.9472 | 1.782 | **1.956** | 0.134 ms | 0.0168x |
-| **OVERALL** | **5.02 dB** | **8.67 dB** | **+3.65 dB** | **0.8059** | **0.8414** | **1.356** | **1.589** | **0.136 ms** | **0.0170x** |
-
-### 3. Real-Time Inference Latency
-
-- **Target Real-Time Budget**: `< 8.0 ms` per 8ms block shift for real-time streaming capability.
-- **Laptop CPU Benchmark**: **`0.136 ms`** per block (58.8x faster than the real-time threshold budget).
-- **Latency Headroom Margin**: **`7.864 ms`** headroom remaining per 8.0 ms frame.
+| **-5.0 dB** | 24 | -4.98 dB | **2.45 dB** | 0.6870 | **0.7005** | 1.133 | **1.247** | 0.543 ms | 0.0678x |
+| **0.0 dB** | 24 | -0.00 dB | **8.01 dB** | 0.7969 | **0.8322** | 1.258 | **1.508** | 0.543 ms | 0.0678x |
+| **5.0 dB** | 24 | 5.00 dB | **11.24 dB** | 0.8554 | **0.8744** | 1.469 | **1.767** | 0.543 ms | 0.0678x |
+| **10.0 dB** | 24 | 9.99 dB | **15.79 dB** | 0.8984 | **0.9234** | 1.528 | **1.999** | 0.543 ms | 0.0678x |
+| **15.0 dB** | 24 | 14.99 dB | **18.80 dB** | 0.9369 | **0.9462** | 1.985 | **2.386** | 0.543 ms | 0.0678x |
+| **OVERALL** | **120** | **5.00 dB** | **11.26 dB** | **0.8349** | **0.8553** | **1.475** | **1.782** | **0.543 ms** | **0.0678x** |
 
 ---
 
-## 📁 Repository Structure
+## 📁 Clean Repository Structure
 
 ```
-├── DTLN_model.py                             # Core DTLN model architecture & stateful TFLite submodels
-├── generate_full_dataset.py                  # ESC-50 + MUSAN + LibriSpeech dataset generator
-├── verify_full_dataset.py                    # Automated dataset verification & SNR spot-checking
-├── run_full_training.py                      # Production model training runner (numUnits=64, numLayer=1)
-├── evaluate_full_run.py                      # PESQ / STOI / SI-SNR quantitative evaluation script for .h5 model
-├── transient_limiter.py                      # Adaptive noise floor tracking transient limiter post-processor
-├── evaluate_full_run_with_limiter_relative.py # Evaluation script for chained DTLN + Relative Limiter
-├── export_tflite_full_run.py                 # Exports .h5 weights to model_1.tflite & model_2.tflite
-├── sanity_check_tflite.py                    # Quick 10-file LiteRT / TFLite numerical verification script
-├── evaluate_tflite_full_run.py               # Full 120-file TFLite evaluation script with per-block timing
-├── pi_deployment_guide.md                    # Step-by-step Raspberry Pi 5 setup & CLI execution guide
-├── requirements_pi.txt                       # Lightweight runtime Python dependencies for Raspberry Pi 5
-├── .gitignore                                # Git ignore configuration
-└── README.md                                 # Project documentation
+DTLN/
+├── DTLN_model.py                     # Core DTLN architecture (numUnits=256, stateful submodels)
+├── generate_full_dataset.py          # ESC-50 + MUSAN + LibriSpeech dataset synthesizer
+├── verify_full_dataset.py            # Automated dataset integrity & SNR spot-checker
+├── build_colab_notebook.py           # Generator script for Google Colab training notebook
+├── train_dtln_colab.ipynb            # Google Colab GPU training notebook
+├── export_tflite_scaled_run.py       # Exports 256u weights to model_1.tflite & model_2.tflite
+├── sanity_check_tflite_scaled.py     # PC-side TFLite vs H5 numerical agreement checker
+├── evaluate_tflite_scaled_run.py     # Full evaluation pipeline (PESQ, STOI, SI-SNR, RTF)
+├── real_time_processing_tf_lite.py   # Live audio streaming inference (sounddevice / TFLite)
+├── real_time_dtln_audio.py           # Real-time microphone audio processing runner
+├── pi_deployment_guide_scaled.md     # Raspberry Pi 5 setup & CLI deployment guide
+├── requirements_pi.txt               # Lightweight ARM64 dependencies for Raspberry Pi 5
+├── models_scaled_run/                # Production model weights & exported TFLite models
+│   ├── scaled_run.weights.h5         # Trained Keras 256-unit model weights
+│   ├── model_1.tflite                # Stage 1 STFT-domain TFLite submodel (2.27 MB)
+│   └── model_2.tflite                # Stage 2 Time-domain TFLite submodel (3.27 MB)
+├── data_full/                        # Dataset audio files and evaluation result CSVs
+└── README.md                         # Project documentation
 ```
 
 ---
 
-## 🛠️ Installation & Setup
+## 🛠️ Environment Setup
 
 ### 1. Prerequisites
 - Python 3.10+
 - Virtual Environment (`.venv`)
 
-### 2. Environment Installation
+### 2. Installation
 
 ```bash
 # Clone the repository
@@ -89,65 +94,51 @@ cd ANC
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-# Install dependencies
-pip install tensorflow librosa soundfile pystoi pesq scipy numpy
+# Install core dependencies
+pip install tensorflow librosa soundfile pystoi pesq scipy numpy sounddevice
 ```
 
 ---
 
-## 🚀 Usage Guide
+## 🚀 Quickstart & Usage
 
-### 1. Generating Training & Validation Datasets
-
-To synthesize 800 paired noisy/clean audio files (16kHz mono, 15s clips) from ESC-50, MUSAN, and LibriSpeech:
-
+### 1. Generate Training & Validation Dataset
+To synthesize clean speech / noise pairs (16 kHz mono, 15s clips) across -5 dB to 25 dB SNR:
 ```bash
 python generate_full_dataset.py
-```
-
-To verify dataset integrity, disjoint speaker splits, and target SNR accuracy:
-
-```bash
 python verify_full_dataset.py
 ```
 
-### 2. Training the Model
+### 2. Train on Google Colab (GPU)
+Upload `train_dtln_colab.ipynb` and `data_full/` to Google Colab, select a GPU T4/A100 runtime, and execute training. Save the resulting `scaled_run.weights.h5` into `models_scaled_run/`.
 
-To launch full training using `numUnits=64`, `numLayer=1`, SI-SNR loss, and early stopping:
-
+### 3. Export Trained Weights to TFLite
+To convert the 256-unit Keras model into stateful TFLite submodels:
 ```bash
-python run_full_training.py
+python export_tflite_scaled_run.py
+```
+Outputs:
+- `models_scaled_run/model_1.tflite` (2.27 MB)
+- `models_scaled_run/model_2.tflite` (3.27 MB)
+
+### 4. Run Numerical Sanity Check
+To verify that TFLite predictions match the reference Keras model output (SI-SNR agreement ≥ 35 dB):
+```bash
+python sanity_check_tflite_scaled.py
 ```
 
-Checkpoints will be saved to `models_full_run/full_run.weights.h5`, and training logs will be written to `models_full_run/training_full_run.log`.
-
-### 3. Exporting to TFLite
-
-To convert the trained `.h5` model into two stateful TFLite submodels (`model_1.tflite` and `model_2.tflite`):
-
+### 5. Evaluate on Raspberry Pi 5
+Transfer `models_scaled_run/` and `evaluate_tflite_scaled_run.py` to Raspberry Pi 5. Run the evaluation suite:
 ```bash
-python export_tflite_full_run.py
+python evaluate_tflite_scaled_run.py
 ```
+Follow [pi_deployment_guide_scaled.md](pi_deployment_guide_scaled.md) for full ARM64 system setup instructions.
 
-### 4. Running TFLite / LiteRT Sanity Check
-
-To run a quick 10-file comparative verification:
-
+### 6. Run Real-Time Microphone Streaming
+To run real-time noise suppression from microphone input to speaker output:
 ```bash
-python sanity_check_tflite.py
+python real_time_processing_tf_lite.py
 ```
-
-### 5. Full TFLite Quantitative Evaluation & Latency Measurement
-
-To evaluate the TFLite submodels over all 120 held-out validation files with per-block timing instrumentation:
-
-```bash
-python evaluate_tflite_full_run.py
-```
-
-### 6. Raspberry Pi 5 Deployment
-
-For complete, copy-pasteable CLI commands to transfer files, install system dependencies (`apt-get`), configure virtual environments, and run evaluation on a Raspberry Pi 5, refer to [pi_deployment_guide.md](pi_deployment_guide.md).
 
 ---
 

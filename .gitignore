@@ -31,7 +31,9 @@ test_output/
 
 # Model Checkpoints (Heavy binary files)
 models_full_run/
+models_scaled_run/
 models_smoke_test/
 *.h5
 *.tflite
 *.onnx
+

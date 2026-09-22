@@ -141,8 +141,8 @@ class DTLN_model():
         self.batchsize = 32
         self.len_samples = 15
         self.activation = 'sigmoid'
-        self.numUnits = 128
-        self.numLayer = 2
+        self.numUnits = 256
+        self.numLayer = 1
         self.blockLen = 512
         self.block_shift = 128
         self.dropout = 0.25

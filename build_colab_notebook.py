@@ -1,0 +1,431 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+build_colab_notebook.py - Generates train_dtln_colab.ipynb with all inline code,
+Colab Google Drive mounting, unzipping, GPU check, and persistent model weight saving.
+"""
+
+import json
+
+def create_colab_notebook():
+    notebook = {
+        "cells": [
+            {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": [
+                    "# DTLN 256-Unit Model GPU Training Notebook (Google Colab)\n",
+                    "This self-contained notebook trains the **256-unit DTLN model** (`numUnits=256`, `numLayer=1`, **1,446,145 parameters**) on the **4,200-pair dataset** using GPU acceleration.\n",
+                    "\n",
+                    "### Manual Steps Before Running:\n",
+                    "1. Upload `data_full.zip` from your local machine to your **Google Drive** in a folder named `DTLN` (i.e., `My Drive/DTLN/data_full.zip`).\n",
+                    "2. Select GPU Hardware Accelerator in Colab: **Runtime > Change runtime type > T4 GPU (or A100)**.\n",
+                    "3. Run the cells sequentially below."
+                ]
+            },
+            {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": [
+                    "## Cell 1: GPU Inspection & Hardware Verification"
+                ]
+            },
+            {
+                "cell_type": "code",
+                "execution_count": None,
+                "metadata": {},
+                "outputs": [],
+                "source": [
+                    "import tensorflow as tf\n",
+                    "print(\"TensorFlow Version:\", tf.__version__)\n",
+                    "gpus = tf.config.list_physical_devices('GPU')\n",
+                    "print(\"Physical GPUs Available:\", len(gpus))\n",
+                    "if len(gpus) > 0:\n",
+                    "    print(f\"SUCCESS: Execution Device: GPU ({gpus[0].name})\")\n",
+                    "else:\n",
+                    "    print(\"\\n\" + \"=\"*80)\n",
+                    "    print(\" WARNING: NO GPU DETECTED!\")\n",
+                    "    print(\" Please enable GPU acceleration: Runtime > Change runtime type > T4 GPU\")\n",
+                    "    print(\"=\"*80 + \"\\n\")"
+                ]
+            },
+            {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": [
+                    "## Cell 2: Mount Google Drive"
+                ]
+            },
+            {
+                "cell_type": "code",
+                "execution_count": None,
+                "metadata": {},
+                "outputs": [],
+                "source": [
+                    "from google.colab import drive\n",
+                    "drive.mount('/content/drive')"
+                ]
+            },
+            {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": [
+                    "## Cell 3: Install Required Audio Dependencies"
+                ]
+            },
+            {
+                "cell_type": "code",
+                "execution_count": None,
+                "metadata": {},
+                "outputs": [],
+                "source": [
+                    "!pip install -q soundfile wavinfo"
+                ]
+            },
+            {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": [
+                    "## Cell 4: Unzip Dataset Archive (`data_full.zip`) to Colab Disk"
+                ]
+            },
+            {
+                "cell_type": "code",
+                "execution_count": None,
+                "metadata": {},
+                "outputs": [],
+                "source": [
+                    "import os\n",
+                    "import zipfile\n",
+                    "\n",
+                    "drive_zip_path = \"/content/drive/MyDrive/DTLN/data_full.zip\"\n",
+                    "target_dir = \"/content/data_full\"\n",
+                    "\n",
+                    "if not os.path.exists(drive_zip_path):\n",
+                    "    raise FileNotFoundError(f\"Dataset zip file not found at '{drive_zip_path}'. Please upload 'data_full.zip' to Google Drive under folder 'DTLN'.\")\n",
+                    "\n",
+                    "print(f\"Unzipping '{drive_zip_path}' to '/content'...\")\n",
+                    "with zipfile.ZipFile(drive_zip_path, 'r') as zip_ref:\n",
+                    "    zip_ref.extractall(\"/content\")\n",
+                    "\n",
+                    "print(\"SUCCESS: Unzip complete! Verifying contents:\")\n",
+                    "print(\"  train_mix:   \", len(os.listdir('/content/data_full/train_mix')), \"files\")\n",
+                    "print(\"  train_speech:\", len(os.listdir('/content/data_full/train_speech')), \"files\")\n",
+                    "print(\"  val_mix:     \", len(os.listdir('/content/data_full/val_mix')), \"files\")\n",
+                    "print(\"  val_speech:  \", len(os.listdir('/content/data_full/val_speech')), \"files\")"
+                ]
+            },
+            {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": [
+                    "## Cell 5: Self-Contained DTLN Architecture & Dataset Generator"
+                ]
+            },
+            {
+                "cell_type": "code",
+                "execution_count": None,
+                "metadata": {},
+                "outputs": [],
+                "source": [
+                    "import os, fnmatch\n",
+                    "import tensorflow.keras as keras\n",
+                    "import keras.ops as ops\n",
+                    "from tensorflow.keras.models import Model\n",
+                    "from tensorflow.keras.layers import Activation, Dense, LSTM, Dropout, Lambda, Input, Multiply, Layer, Conv1D\n",
+                    "from tensorflow.keras.callbacks import ReduceLROnPlateau, CSVLogger, EarlyStopping, ModelCheckpoint\n",
+                    "import tensorflow as tf\n",
+                    "import soundfile as sf\n",
+                    "from wavinfo import WavInfoReader\n",
+                    "from random import shuffle, seed\n",
+                    "import numpy as np\n",
+                    "\n",
+                    "class audio_generator():\n",
+                    "    def __init__(self, path_to_input, path_to_s1, len_of_samples, fs, train_flag=False):\n",
+                    "        self.path_to_input = path_to_input\n",
+                    "        self.path_to_s1 = path_to_s1\n",
+                    "        self.len_of_samples = len_of_samples\n",
+                    "        self.fs = fs\n",
+                    "        self.train_flag = train_flag\n",
+                    "        self.count_samples()\n",
+                    "        self.create_tf_data_obj()\n",
+                    "\n",
+                    "    def count_samples(self):\n",
+                    "        self.file_names = fnmatch.filter(os.listdir(self.path_to_input), '*.wav')\n",
+                    "        self.total_samples = 0\n",
+                    "        for file in self.file_names:\n",
+                    "            info = WavInfoReader(os.path.join(self.path_to_input, file))\n",
+                    "            self.total_samples += int(np.fix(info.data.frame_count / self.len_of_samples))\n",
+                    "\n",
+                    "    def create_generator(self):\n",
+                    "        if self.train_flag:\n",
+                    "            shuffle(self.file_names)\n",
+                    "        for file in self.file_names:\n",
+                    "            noisy, fs_1 = sf.read(os.path.join(self.path_to_input, file))\n",
+                    "            speech, fs_2 = sf.read(os.path.join(self.path_to_s1, file))\n",
+                    "            if fs_1 != self.fs or fs_2 != self.fs:\n",
+                    "                raise ValueError('Sampling rates do not match.')\n",
+                    "            if noisy.ndim != 1 or speech.ndim != 1:\n",
+                    "                raise ValueError('Audio must be single channel.')\n",
+                    "            num_samples = int(np.fix(noisy.shape[0] / self.len_of_samples))\n",
+                    "            for idx in range(num_samples):\n",
+                    "                in_dat = noisy[int(idx * self.len_of_samples):int((idx + 1) * self.len_of_samples)]\n",
+                    "                tar_dat = speech[int(idx * self.len_of_samples):int((idx + 1) * self.len_of_samples)]\n",
+                    "                yield in_dat.astype('float32'), tar_dat.astype('float32')\n",
+                    "\n",
+                    "    def create_tf_data_obj(self):\n",
+                    "        self.tf_data_set = tf.data.Dataset.from_generator(\n",
+                    "            self.create_generator,\n",
+                    "            (tf.float32, tf.float32),\n",
+                    "            output_shapes=(tf.TensorShape([self.len_of_samples]), tf.TensorShape([self.len_of_samples])),\n",
+                    "            args=None\n",
+                    "        )\n",
+                    "\n",
+                    "class InstantLayerNormalization(Layer):\n",
+                    "    def __init__(self, **kwargs):\n",
+                    "        super(InstantLayerNormalization, self).__init__(**kwargs)\n",
+                    "        self.epsilon = 1e-7\n",
+                    "        self.gamma = None\n",
+                    "        self.beta = None\n",
+                    "\n",
+                    "    def build(self, input_shape):\n",
+                    "        shape = input_shape[-1:]\n",
+                    "        self.gamma = self.add_weight(shape=shape, initializer='ones', trainable=True, name='gamma')\n",
+                    "        self.beta = self.add_weight(shape=shape, initializer='zeros', trainable=True, name='beta')\n",
+                    "\n",
+                    "    def call(self, inputs):\n",
+                    "        mean = tf.math.reduce_mean(inputs, axis=[-1], keepdims=True)\n",
+                    "        variance = tf.math.reduce_mean(tf.math.square(inputs - mean), axis=[-1], keepdims=True)\n",
+                    "        std = tf.math.sqrt(variance + self.epsilon)\n",
+                    "        outputs = (inputs - mean) / std\n",
+                    "        outputs = outputs * self.gamma + self.beta\n",
+                    "        return outputs\n",
+                    "\n",
+                    "class DTLN_model():\n",
+                    "    def __init__(self):\n",
+                    "        self.cost_function = self.snr_cost\n",
+                    "        self.model = []\n",
+                    "        self.fs = 16000\n",
+                    "        self.batchsize = 16\n",
+                    "        self.len_samples = 15\n",
+                    "        self.activation = 'sigmoid'\n",
+                    "        self.numUnits = 256\n",
+                    "        self.numLayer = 1\n",
+                    "        self.blockLen = 512\n",
+                    "        self.block_shift = 128\n",
+                    "        self.dropout = 0.25\n",
+                    "        self.lr = 1e-3\n",
+                    "        self.max_epochs = 80\n",
+                    "        self.encoder_size = 256\n",
+                    "        self.eps = 1e-7\n",
+                    "        os.environ['PYTHONHASHSEED'] = str(42)\n",
+                    "        seed(42)\n",
+                    "        np.random.seed(42)\n",
+                    "        tf.random.set_seed(42)\n",
+                    "        physical_devices = tf.config.experimental.list_physical_devices('GPU')\n",
+                    "        if len(physical_devices) > 0:\n",
+                    "            for device in physical_devices:\n",
+                    "                tf.config.experimental.set_memory_growth(device, enable=True)\n",
+                    "\n",
+                    "    @staticmethod\n",
+                    "    def snr_cost(s_estimate, s_true):\n",
+                    "        snr = tf.reduce_mean(tf.math.square(s_true), axis=-1, keepdims=True) / \\\n",
+                    "            (tf.reduce_mean(tf.math.square(s_true - s_estimate), axis=-1, keepdims=True) + 1e-7)\n",
+                    "        num = tf.math.log(snr)\n",
+                    "        denom = tf.math.log(tf.constant(10, dtype=num.dtype))\n",
+                    "        loss = -10 * (num / denom)\n",
+                    "        return loss\n",
+                    "\n",
+                    "    def lossWrapper(self):\n",
+                    "        def lossFunction(y_true, y_pred):\n",
+                    "            loss = tf.squeeze(self.cost_function(y_pred, y_true))\n",
+                    "            loss = tf.reduce_mean(loss)\n",
+                    "            return loss\n",
+                    "        return lossFunction\n",
+                    "\n",
+                    "    def stftLayer(self, x):\n",
+                    "        frames = tf.signal.frame(x, self.blockLen, self.block_shift)\n",
+                    "        stft_dat = tf.signal.rfft(frames)\n",
+                    "        mag = tf.abs(stft_dat)\n",
+                    "        phase = tf.math.angle(stft_dat)\n",
+                    "        return [mag, phase]\n",
+                    "\n",
+                    "    def ifftLayer(self, x):\n",
+                    "        s1_stft = (tf.cast(x[0], tf.complex64) * tf.exp((1j * tf.cast(x[1], tf.complex64))))\n",
+                    "        return tf.signal.irfft(s1_stft)\n",
+                    "\n",
+                    "    def overlapAddLayer(self, x):\n",
+                    "        return tf.signal.overlap_and_add(x, self.block_shift)\n",
+                    "\n",
+                    "    def seperation_kernel(self, num_layer, mask_size, x, stateful=False):\n",
+                    "        for idx in range(num_layer):\n",
+                    "            x = LSTM(self.numUnits, return_sequences=True, stateful=stateful)(x)\n",
+                    "            if idx < (num_layer - 1):\n",
+                    "                x = Dropout(self.dropout)(x)\n",
+                    "        mask = Dense(mask_size)(x)\n",
+                    "        mask = Activation(self.activation)(mask)\n",
+                    "        return mask\n",
+                    "\n",
+                    "    def build_DTLN_model(self, norm_stft=False):\n",
+                    "        time_dat = Input(batch_shape=(None, None))\n",
+                    "        mag, angle = Lambda(self.stftLayer)(time_dat)\n",
+                    "        mag_norm = InstantLayerNormalization()(tf.math.log(mag + 1e-7)) if norm_stft else mag\n",
+                    "        mask_1 = self.seperation_kernel(self.numLayer, (self.blockLen // 2 + 1), mag_norm)\n",
+                    "        estimated_mag = Multiply()([mag, mask_1])\n",
+                    "        estimated_frames_1 = Lambda(self.ifftLayer)([estimated_mag, angle])\n",
+                    "        encoded_frames = Conv1D(self.encoder_size, 1, strides=1, use_bias=False)(estimated_frames_1)\n",
+                    "        encoded_frames_norm = InstantLayerNormalization()(encoded_frames)\n",
+                    "        mask_2 = self.seperation_kernel(self.numLayer, self.encoder_size, encoded_frames_norm)\n",
+                    "        estimated = Multiply()([encoded_frames, mask_2])\n",
+                    "        decoded_frames = Conv1D(self.blockLen, 1, padding='causal', use_bias=False)(estimated)\n",
+                    "        estimated_sig = Lambda(self.overlapAddLayer)(decoded_frames)\n",
+                    "        self.model = Model(inputs=time_dat, outputs=estimated_sig)\n",
+                    "        print(self.model.summary())\n",
+                    "\n",
+                    "    def compile_model(self):\n",
+                    "        optimizerAdam = keras.optimizers.Adam(learning_rate=self.lr, clipnorm=3.0)\n",
+                    "        self.model.compile(loss=self.lossWrapper(), optimizer=optimizerAdam)\n",
+                    "\n",
+                    "    def train_model(self, runName, path_to_train_mix, path_to_train_speech, path_to_val_mix, path_to_val_speech, drive_save_dir):\n",
+                    "        os.makedirs(drive_save_dir, exist_ok=True)\n",
+                    "        csv_logger = CSVLogger(os.path.join(drive_save_dir, f'training_{runName}.log'))\n",
+                    "        reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3, min_lr=10**(-10), cooldown=1)\n",
+                    "        early_stopping = EarlyStopping(monitor='val_loss', min_delta=0, patience=10, verbose=1, mode='auto')\n",
+                    "        weights_file_path = os.path.join(drive_save_dir, f'{runName}.weights.h5')\n",
+                    "        checkpointer = ModelCheckpoint(weights_file_path, monitor='val_loss', verbose=1, save_best_only=True, save_weights_only=True, mode='auto', save_freq='epoch')\n",
+                    "\n",
+                    "        len_in_samples = int(np.fix(self.fs * self.len_samples / self.block_shift) * self.block_shift)\n",
+                    "        generator_input = audio_generator(path_to_train_mix, path_to_train_speech, len_in_samples, self.fs, train_flag=True)\n",
+                    "        dataset = generator_input.tf_data_set.batch(self.batchsize, drop_remainder=True).repeat()\n",
+                    "        steps_train = generator_input.total_samples // self.batchsize\n",
+                    "\n",
+                    "        generator_val = audio_generator(path_to_val_mix, path_to_val_speech, len_in_samples, self.fs)\n",
+                    "        dataset_val = generator_val.tf_data_set.batch(self.batchsize, drop_remainder=True).repeat()\n",
+                    "        steps_val = generator_val.total_samples // self.batchsize\n",
+                    "\n",
+                    "        print(f\"Starting training for {self.max_epochs} max epochs...\")\n",
+                    "        self.model.fit(\n",
+                    "            x=dataset,\n",
+                    "            steps_per_epoch=steps_train,\n",
+                    "            epochs=self.max_epochs,\n",
+                    "            verbose=1,\n",
+                    "            validation_data=dataset_val,\n",
+                    "            validation_steps=steps_val,\n",
+                    "            callbacks=[checkpointer, reduce_lr, csv_logger, early_stopping]\n",
+                    "        )\n",
+                    "        tf.keras.backend.clear_session()\n",
+                    "        print(f\"SUCCESS: Checkpoint saved persistently to Google Drive: '{weights_file_path}'\")"
+                ]
+            },
+            {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": [
+                    "## Cell 6: Execute Full Training Run (256-Unit Model)"
+                ]
+            },
+            {
+                "cell_type": "code",
+                "execution_count": None,
+                "metadata": {},
+                "outputs": [],
+                "source": [
+                    "import time\n",
+                    "\n",
+                    "path_train_mix = '/content/data_full/train_mix'\n",
+                    "path_train_speech = '/content/data_full/train_speech'\n",
+                    "path_val_mix = '/content/data_full/val_mix'\n",
+                    "path_val_speech = '/content/data_full/val_speech'\n",
+                    "drive_save_dir = '/content/drive/MyDrive/DTLN/models_full_run'\n",
+                    "\n",
+                    "run_name = 'full_run_256'\n",
+                    "\n",
+                    "model_trainer = DTLN_model()\n",
+                    "model_trainer.numUnits = 256\n",
+                    "model_trainer.numLayer = 1\n",
+                    "model_trainer.max_epochs = 80\n",
+                    "model_trainer.batchsize = 16\n",
+                    "model_trainer.cost_function = model_trainer.snr_cost\n",
+                    "\n",
+                    "print(\"=== Starting DTLN 256-Unit GPU Training ===\")\n",
+                    "print(f\"  LSTM Units (`numUnits`): {model_trainer.numUnits}\")\n",
+                    "print(f\"  LSTM Layers (`numLayer`): {model_trainer.numLayer}\")\n",
+                    "print(f\"  Max Epoch Budget:       {model_trainer.max_epochs}\")\n",
+                    "print(f\"  Batch Size:             {model_trainer.batchsize}\")\n",
+                    "print(f\"  Loss Function:          {model_trainer.cost_function.__name__} (SI-SNR Loss)\")\n",
+                    "print(f\"  Save Path (Drive):      {drive_save_dir}\")\n",
+                    "\n",
+                    "print(\"\\nBuilding model...\")\n",
+                    "model_trainer.build_DTLN_model()\n",
+                    "model_trainer.compile_model()\n",
+                    "\n",
+                    "start_t = time.time()\n",
+                    "model_trainer.train_model(\n",
+                    "    run_name,\n",
+                    "    path_train_mix,\n",
+                    "    path_train_speech,\n",
+                    "    path_val_mix,\n",
+                    "    path_val_speech,\n",
+                    "    drive_save_dir\n",
+                    ")\n",
+                    "elapsed = time.time() - start_t\n",
+                    "print(f\"\\n=== GPU Training Completed in {elapsed / 60.0:.2f} minutes ===\")"
+                ]
+            },
+            {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": [
+                    "## Cell 7: Checkpoint & Log Persistence Verification"
+                ]
+            },
+            {
+                "cell_type": "code",
+                "execution_count": None,
+                "metadata": {},
+                "outputs": [],
+                "source": [
+                    "import os\n",
+                    "\n",
+                    "drive_weights = '/content/drive/MyDrive/DTLN/models_full_run/full_run_256.weights.h5'\n",
+                    "drive_log = '/content/drive/MyDrive/DTLN/models_full_run/training_full_run_256.log'\n",
+                    "\n",
+                    "print(\"=== Google Drive Checkpoint Verification ===\")\n",
+                    "if os.path.exists(drive_weights):\n",
+                    "    print(f\"SUCCESS: Trained Weights file found at: '{drive_weights}' ({os.path.getsize(drive_weights)} bytes)\")\n",
+                    "else:\n",
+                    "    print(f\"WARNING: Weights file not found at '{drive_weights}'!\")\n",
+                    "\n",
+                    "if os.path.exists(drive_log):\n",
+                    "    print(f\"SUCCESS: Training log file found at: '{drive_log}'\")\n",
+                    "    print(\"\\nLast 10 Epoch Log entries:\")\n",
+                    "    with open(drive_log, 'r') as f:\n",
+                    "        lines = f.readlines()\n",
+                    "        for line in lines[-10:]:\n",
+                    "            print(\"  \", line.strip())\n",
+                    "else:\n",
+                    "    print(f\"WARNING: Training log file not found at '{drive_log}'!\")"
+                ]
+            }
+        ],
+        "metadata": {
+            "accelerator": "GPU",
+            "colab": {
+                "provenance": []
+            },
+            "language_info": {
+                "name": "python"
+            }
+        },
+        "nbformat": 4,
+        "nbformat_minor": 2
+    }
+
+    out_path = r"d:\SIH 2026\DTLN\train_dtln_colab.ipynb"
+    with open(out_path, 'w', encoding='utf-8') as f:
+        json.dump(notebook, f, indent=2)
+
+    print(f"SUCCESS: Created Colab Notebook at '{out_path}'")
+
+if __name__ == '__main__':
+    create_colab_notebook()
