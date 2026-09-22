@@ -1,4 +1,4 @@
-# Active Noise Cancellation & Real-Time Speech Enhancement with Scaled DTLN (256-Unit)
+# Active Noise Cancellation & Real-Time Speech Enhancement with DTLN
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10](https://img.shields.io/badge/Python-3.10-blue.svg)](https://www.python.org/)
@@ -6,13 +6,13 @@
 [![Raspberry Pi 5](https://img.shields.io/badge/Raspberry%20Pi%205-ARM64-red.svg)](https://www.raspberrypi.com/)
 [![Real-Time Factor](https://img.shields.io/badge/RTF-0.0678x-brightgreen.svg)](#-benchmark-results)
 
-An end-to-end real-time speech enhancement and active noise cancellation (ANC) pipeline based on the **Dual-Signal Transformation LSTM Network (DTLN)** architecture scaled up to `numUnits=256`, `numLayer=1` (~1.45M parameters). Featuring automated multi-dataset synthesis, GPU acceleration on Google Colab, TFLite/LiteRT stateful streaming conversion, quantitative PESQ/STOI/SI-SNR evaluation, and real-time deployment on **Raspberry Pi 5**.
+An end-to-end real-time speech enhancement and active noise cancellation (ANC) pipeline based on the **Dual-Signal Transformation LSTM Network (DTLN)** architecture (`numUnits=256`, `numLayer=1`, ~1.45M parameters). Featuring automated multi-dataset synthesis, GPU acceleration on Google Colab, TFLite/LiteRT stateful streaming conversion, quantitative PESQ/STOI/SI-SNR evaluation, and real-time deployment on **Raspberry Pi 5**.
 
 ---
 
 ## 📋 Key Features & Highlights
 
-- **Scaled High-Capacity DTLN Architecture**: 2-stage stacked architecture combining STFT-domain mask estimation and learned time-domain Conv1D feature synthesis (`numUnits=256`, `numLayer=1`, 1,451,266 parameters).
+- **High-Capacity DTLN Architecture**: 2-stage stacked architecture combining STFT-domain mask estimation and learned time-domain Conv1D feature synthesis (`numUnits=256`, `numLayer=1`, 1,451,266 parameters).
 - **Ultra-Low Latency & High Real-Time Headroom**: Frame-by-frame block processing (512-sample STFT window, 128-sample hop size = **8.0 ms budget @ 16 kHz**). Achieves **0.543 ms per block** latency on Raspberry Pi 5 (**14.75x real-time speed**, **93.2% CPU headroom**).
 - **Robust Multi-Dataset Pipeline**: Automated synthesis script (`generate_full_dataset.py`) pairing clean speech (**LibriSpeech `dev-clean`**) with environmental noise (**ESC-50**, 50 categories) and background noise (**MUSAN**). Trained on 4,200 pairs across 7 SNR bands (-5, 0, 5, 10, 15, 20, 25 dB).
 - **Strict Data Integrity**: 100% disjoint speaker splits between training (3,570 pairs / 85%) and validation (630 pairs / 15%), verified 16 kHz mono format, and automated SNR verification (`verify_full_dataset.py`).
@@ -25,20 +25,20 @@ An end-to-end real-time speech enhancement and active noise cancellation (ANC) p
 
 ## 📊 Benchmark Results
 
-### 1. Raspberry Pi 5 Measured Performance (256-Unit Model)
+### 1. Raspberry Pi 5 Measured Performance
 
-| Metric | Baseline Noisy | 64u Model (Previous) | **256u Scaled Model (Current)** | Improvement over 64u |
-| :--- | :--- | :--- | :--- | :--- |
-| **SI-SNR (After)** | 5.00 dB | 8.56 dB | **11.26 dB** | **+2.70 dB Gain** 🚀 |
-| **STOI (After)** | 0.8349 | 0.8283 | **0.8553** | **+0.0270 Gain** 🚀 |
-| **PESQ (After)** | 1.475 | 1.509 | **1.782** | **+0.273 Gain** 🚀 |
-| **Avg Block Latency** | — | 0.208 ms | **0.543 ms** | +0.335 ms |
-| **Real-Time Factor (RTF)**| — | 0.0260x | **0.0678x** | **14.75x Faster than Real-Time** |
-| **Latency Budget Headroom**| — | 7.792 ms | **7.457 ms (93.2%)** | Well within 8.0 ms budget |
+| Metric | Input Noisy Audio | Enhanced Output (DTLN Model) | Improvement / Performance |
+| :--- | :--- | :--- | :--- |
+| **SI-SNR** | 5.00 dB | **11.26 dB** | **+6.26 dB Gain** |
+| **STOI** | 0.8349 | **0.8553** | **+0.0204 Gain** |
+| **PESQ (Wideband)** | 1.475 | **1.782** | **+0.307 Gain** |
+| **Avg Block Latency** | — | **0.543 ms / block** | 7.457 ms headroom (vs 8.0 ms budget) |
+| **Real-Time Factor (RTF)**| — | **0.0678x** | **14.75x Faster than Real-Time** |
+| **CPU Headroom** | — | **93.2%** | Remaining CPU capacity per 8ms frame |
 
 ---
 
-### 2. Raspberry Pi 5 Breakdown by Input SNR Level (120 Validation Files)
+### 2. Breakdown by Input SNR Level (120 Validation Files on Pi 5)
 
 | Input SNR | Files | SI-SNR Before | SI-SNR After | STOI Before | STOI After | PESQ Before | PESQ After | Block Latency | Real-Time Factor |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -51,7 +51,7 @@ An end-to-end real-time speech enhancement and active noise cancellation (ANC) p
 
 ---
 
-## 📁 Clean Repository Structure
+## 📁 Repository Structure
 
 ```
 DTLN/
@@ -67,7 +67,7 @@ DTLN/
 ├── real_time_dtln_audio.py           # Real-time microphone audio processing runner
 ├── pi_deployment_guide_scaled.md     # Raspberry Pi 5 setup & CLI deployment guide
 ├── requirements_pi.txt               # Lightweight ARM64 dependencies for Raspberry Pi 5
-├── models_scaled_run/                # Production model weights & exported TFLite models
+├── models_scaled_run/                # Model weights & exported TFLite models
 │   ├── scaled_run.weights.h5         # Trained Keras 256-unit model weights
 │   ├── model_1.tflite                # Stage 1 STFT-domain TFLite submodel (2.27 MB)
 │   └── model_2.tflite                # Stage 2 Time-domain TFLite submodel (3.27 MB)
