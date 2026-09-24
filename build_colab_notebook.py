@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-build_colab_notebook.py - Generates train_dtln_colab.ipynb with all inline code,
-Colab Google Drive mounting, unzipping, GPU check, and persistent model weight saving.
+build_colab_notebook.py - Generates train_dtln_colab.ipynb with complete Google Drive
+mount persistence, epoch-by-epoch checkpointing, automatic resume-from-checkpoint logic,
+sample loss weighting (2.0x for -5dB / 0dB), and continuous CSV log persistence.
 """
 
 import json
@@ -14,20 +15,22 @@ def create_colab_notebook():
                 "cell_type": "markdown",
                 "metadata": {},
                 "source": [
-                    "# DTLN 256-Unit Model GPU Training Notebook (Google Colab)\n",
-                    "This self-contained notebook trains the **256-unit DTLN model** (`numUnits=256`, `numLayer=1`, **1,446,145 parameters**) on the **4,200-pair dataset** using GPU acceleration.\n",
+                    "# DTLN 384-Unit Resumable GPU Training Notebook (Google Colab)\n",
+                    "This notebook trains the **384-unit DTLN model** (`numUnits=384`, `numLayer=1`, **2,430,849 parameters**) on the **5,610-pair oversampled dataset** with low-SNR loss weighting.\n",
                     "\n",
-                    "### Manual Steps Before Running:\n",
-                    "1. Upload `data_full.zip` from your local machine to your **Google Drive** in a folder named `DTLN` (i.e., `My Drive/DTLN/data_full.zip`).\n",
-                    "2. Select GPU Hardware Accelerator in Colab: **Runtime > Change runtime type > T4 GPU (or A100)**.\n",
-                    "3. Run the cells sequentially below."
+                    "### Features Implemented:\n",
+                    "1. **Google Drive Mount Persistence**: Writes checkpoints directly to `/content/drive/MyDrive/SIH2026_DTLN/models_384_run/`.\n",
+                    "2. **Epoch-by-Epoch Checkpoint Saving**: Saves `epoch_{epoch:03d}.weights.h5` after EVERY epoch.\n",
+                    "3. **Automatic Resume-from-Checkpoint**: Automatically detects the latest epoch checkpoint in Google Drive and resumes training seamlessly if a Colab session disconnects.\n",
+                    "4. **Continuous CSV Logging**: Appends training loss/metrics history directly to Google Drive after each epoch (`training_384_run.log`).\n",
+                    "5. **Sample Loss Weighting**: Applies **2.0x loss weight** for `-5 dB` & `0 dB` SNR audio samples, and **1.0x loss weight** for `5 dB` to `25 dB` SNR samples."
                 ]
             },
             {
                 "cell_type": "markdown",
                 "metadata": {},
                 "source": [
-                    "## Cell 1: GPU Inspection & Hardware Verification"
+                    "## Cell 1: GPU Inspection & Environment Verification"
                 ]
             },
             {
@@ -45,7 +48,7 @@ def create_colab_notebook():
                     "else:\n",
                     "    print(\"\\n\" + \"=\"*80)\n",
                     "    print(\" WARNING: NO GPU DETECTED!\")\n",
-                    "    print(\" Please enable GPU acceleration: Runtime > Change runtime type > T4 GPU\")\n",
+                    "    print(\" Please enable GPU acceleration: Runtime > Change runtime type > T4 GPU / A100\")\n",
                     "    print(\"=\"*80 + \"\\n\")"
                 ]
             },
@@ -70,7 +73,7 @@ def create_colab_notebook():
                 "cell_type": "markdown",
                 "metadata": {},
                 "source": [
-                    "## Cell 3: Install Required Audio Dependencies"
+                    "## Cell 3: Install Dependencies"
                 ]
             },
             {
@@ -86,7 +89,7 @@ def create_colab_notebook():
                 "cell_type": "markdown",
                 "metadata": {},
                 "source": [
-                    "## Cell 4: Unzip Dataset Archive (`data_full.zip`) to Colab Disk"
+                    "## Cell 4: Unzip Dataset (`data_full.zip`) to Local Colab Disk"
                 ]
             },
             {
@@ -98,17 +101,19 @@ def create_colab_notebook():
                     "import os\n",
                     "import zipfile\n",
                     "\n",
-                    "drive_zip_path = \"/content/drive/MyDrive/DTLN/data_full.zip\"\n",
-                    "target_dir = \"/content/data_full\"\n",
+                    "drive_zip_path = \"/content/drive/MyDrive/SIH2026_DTLN/data_full.zip\"\n",
+                    "if not os.path.exists(drive_zip_path):\n",
+                    "    # Fallback path\n",
+                    "    drive_zip_path = \"/content/drive/MyDrive/DTLN/data_full.zip\"\n",
                     "\n",
                     "if not os.path.exists(drive_zip_path):\n",
-                    "    raise FileNotFoundError(f\"Dataset zip file not found at '{drive_zip_path}'. Please upload 'data_full.zip' to Google Drive under folder 'DTLN'.\")\n",
+                    "    raise FileNotFoundError(f\"Dataset zip file not found at '{drive_zip_path}'. Please upload 'data_full.zip' to Google Drive under 'SIH2026_DTLN/'.\")\n",
                     "\n",
                     "print(f\"Unzipping '{drive_zip_path}' to '/content'...\")\n",
                     "with zipfile.ZipFile(drive_zip_path, 'r') as zip_ref:\n",
                     "    zip_ref.extractall(\"/content\")\n",
                     "\n",
-                    "print(\"SUCCESS: Unzip complete! Verifying contents:\")\n",
+                    "print(\"SUCCESS: Unzip complete! Dataset summary:\")\n",
                     "print(\"  train_mix:   \", len(os.listdir('/content/data_full/train_mix')), \"files\")\n",
                     "print(\"  train_speech:\", len(os.listdir('/content/data_full/train_speech')), \"files\")\n",
                     "print(\"  val_mix:     \", len(os.listdir('/content/data_full/val_mix')), \"files\")\n",
@@ -119,7 +124,7 @@ def create_colab_notebook():
                 "cell_type": "markdown",
                 "metadata": {},
                 "source": [
-                    "## Cell 5: Self-Contained DTLN Architecture & Dataset Generator"
+                    "## Cell 5: Self-Contained DTLN Architecture & Weighted Dataset Generator"
                 ]
             },
             {
@@ -128,7 +133,7 @@ def create_colab_notebook():
                 "metadata": {},
                 "outputs": [],
                 "source": [
-                    "import os, fnmatch\n",
+                    "import os, fnmatch, re, glob\n",
                     "import tensorflow.keras as keras\n",
                     "import keras.ops as ops\n",
                     "from tensorflow.keras.models import Model\n",
@@ -141,12 +146,13 @@ def create_colab_notebook():
                     "import numpy as np\n",
                     "\n",
                     "class audio_generator():\n",
-                    "    def __init__(self, path_to_input, path_to_s1, len_of_samples, fs, train_flag=False):\n",
+                    "    def __init__(self, path_to_input, path_to_s1, len_of_samples, fs, train_flag=False, low_snr_weight=2.0):\n",
                     "        self.path_to_input = path_to_input\n",
                     "        self.path_to_s1 = path_to_s1\n",
                     "        self.len_of_samples = len_of_samples\n",
                     "        self.fs = fs\n",
                     "        self.train_flag = train_flag\n",
+                    "        self.low_snr_weight = low_snr_weight\n",
                     "        self.count_samples()\n",
                     "        self.create_tf_data_obj()\n",
                     "\n",
@@ -156,6 +162,12 @@ def create_colab_notebook():
                     "        for file in self.file_names:\n",
                     "            info = WavInfoReader(os.path.join(self.path_to_input, file))\n",
                     "            self.total_samples += int(np.fix(info.data.frame_count / self.len_of_samples))\n",
+                    "\n",
+                    "    def get_sample_weight(self, filename):\n",
+                    "        # Upweight -5 dB and 0 dB samples to 2.0x\n",
+                    "        if ('snr-5dB' in filename) or ('snr0dB' in filename):\n",
+                    "            return float(self.low_snr_weight)\n",
+                    "        return 1.0\n",
                     "\n",
                     "    def create_generator(self):\n",
                     "        if self.train_flag:\n",
@@ -167,17 +179,18 @@ def create_colab_notebook():
                     "                raise ValueError('Sampling rates do not match.')\n",
                     "            if noisy.ndim != 1 or speech.ndim != 1:\n",
                     "                raise ValueError('Audio must be single channel.')\n",
+                    "            weight = self.get_sample_weight(file)\n",
                     "            num_samples = int(np.fix(noisy.shape[0] / self.len_of_samples))\n",
                     "            for idx in range(num_samples):\n",
                     "                in_dat = noisy[int(idx * self.len_of_samples):int((idx + 1) * self.len_of_samples)]\n",
                     "                tar_dat = speech[int(idx * self.len_of_samples):int((idx + 1) * self.len_of_samples)]\n",
-                    "                yield in_dat.astype('float32'), tar_dat.astype('float32')\n",
+                    "                yield in_dat.astype('float32'), tar_dat.astype('float32'), np.float32(weight)\n",
                     "\n",
                     "    def create_tf_data_obj(self):\n",
                     "        self.tf_data_set = tf.data.Dataset.from_generator(\n",
                     "            self.create_generator,\n",
-                    "            (tf.float32, tf.float32),\n",
-                    "            output_shapes=(tf.TensorShape([self.len_of_samples]), tf.TensorShape([self.len_of_samples])),\n",
+                    "            (tf.float32, tf.float32, tf.float32),\n",
+                    "            output_shapes=(tf.TensorShape([self.len_of_samples]), tf.TensorShape([self.len_of_samples]), tf.TensorShape([])),\n",
                     "            args=None\n",
                     "        )\n",
                     "\n",
@@ -209,7 +222,7 @@ def create_colab_notebook():
                     "        self.batchsize = 16\n",
                     "        self.len_samples = 15\n",
                     "        self.activation = 'sigmoid'\n",
-                    "        self.numUnits = 256\n",
+                    "        self.numUnits = 384\n",
                     "        self.numLayer = 1\n",
                     "        self.blockLen = 512\n",
                     "        self.block_shift = 128\n",
@@ -287,41 +300,80 @@ def create_colab_notebook():
                     "        self.model.compile(loss=self.lossWrapper(), optimizer=optimizerAdam)\n",
                     "\n",
                     "    def train_model(self, runName, path_to_train_mix, path_to_train_speech, path_to_val_mix, path_to_val_speech, drive_save_dir):\n",
+                    "        # Paths\n",
                     "        os.makedirs(drive_save_dir, exist_ok=True)\n",
-                    "        csv_logger = CSVLogger(os.path.join(drive_save_dir, f'training_{runName}.log'))\n",
+                    "        checkpoint_dir = os.path.join(drive_save_dir, 'checkpoints')\n",
+                    "        os.makedirs(checkpoint_dir, exist_ok=True)\n",
+                    "\n",
+                    "        # 1. Resume Checkpoint Detection\n",
+                    "        existing_checkpoints = glob.glob(os.path.join(checkpoint_dir, 'epoch_*.weights.h5'))\n",
+                    "        initial_epoch = 0\n",
+                    "        latest_checkpoint = None\n",
+                    "\n",
+                    "        if existing_checkpoints:\n",
+                    "            epochs_found = []\n",
+                    "            for ckpt in existing_checkpoints:\n",
+                    "                match = re.search(r'epoch_(\d+)\.weights\.h5$', ckpt)\n",
+                    "                if match:\n",
+                    "                    epochs_found.append((int(match.group(1)), ckpt))\n",
+                    "            if epochs_found:\n",
+                    "                epochs_found.sort()\n",
+                    "                initial_epoch, latest_checkpoint = epochs_found[-1]\n",
+                    "                print(f\"\\n\" + \"=\"*70)\n",
+                    "                print(f\" RESUME DETECTED: Found checkpoint '{os.path.basename(latest_checkpoint)}'\")\n",
+                    "                print(f\" Loading weights and resuming from Epoch {initial_epoch} / {self.max_epochs}...\")\n",
+                    "                print(\"=\"*70 + \"\\n\")\n",
+                    "                self.model.load_weights(latest_checkpoint)\n",
+                    "        else:\n",
+                    "            print(\"\\nNo existing checkpoints found in Google Drive. Starting fresh training from Epoch 0...\")\n",
+                    "\n",
+                    "        # Callbacks\n",
+                    "        log_file = os.path.join(drive_save_dir, f'training_{runName}.log')\n",
+                    "        csv_logger = CSVLogger(log_file, append=True)\n",
                     "        reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3, min_lr=10**(-10), cooldown=1)\n",
                     "        early_stopping = EarlyStopping(monitor='val_loss', min_delta=0, patience=10, verbose=1, mode='auto')\n",
-                    "        weights_file_path = os.path.join(drive_save_dir, f'{runName}.weights.h5')\n",
-                    "        checkpointer = ModelCheckpoint(weights_file_path, monitor='val_loss', verbose=1, save_best_only=True, save_weights_only=True, mode='auto', save_freq='epoch')\n",
+                    "        \n",
+                    "        # Best model checkpoint (saved on val_loss improvement)\n",
+                    "        best_weights_path = os.path.join(drive_save_dir, f'{runName}.weights.h5')\n",
+                    "        best_checkpointer = ModelCheckpoint(\n",
+                    "            best_weights_path, monitor='val_loss', verbose=1, save_best_only=True, save_weights_only=True, mode='auto', save_freq='epoch'\n",
+                    "        )\n",
+                    "        \n",
+                    "        # Per-epoch checkpoint (saved EVERY epoch for disconnect resilience)\n",
+                    "        epoch_checkpoint_pattern = os.path.join(checkpoint_dir, 'epoch_{epoch:03d}.weights.h5')\n",
+                    "        epoch_checkpointer = ModelCheckpoint(\n",
+                    "            epoch_checkpoint_pattern, verbose=1, save_best_only=False, save_weights_only=True, save_freq='epoch'\n",
+                    "        )\n",
                     "\n",
                     "        len_in_samples = int(np.fix(self.fs * self.len_samples / self.block_shift) * self.block_shift)\n",
-                    "        generator_input = audio_generator(path_to_train_mix, path_to_train_speech, len_in_samples, self.fs, train_flag=True)\n",
+                    "        generator_input = audio_generator(path_to_train_mix, path_to_train_speech, len_in_samples, self.fs, train_flag=True, low_snr_weight=2.0)\n",
                     "        dataset = generator_input.tf_data_set.batch(self.batchsize, drop_remainder=True).repeat()\n",
                     "        steps_train = generator_input.total_samples // self.batchsize\n",
                     "\n",
-                    "        generator_val = audio_generator(path_to_val_mix, path_to_val_speech, len_in_samples, self.fs)\n",
+                    "        generator_val = audio_generator(path_to_val_mix, path_to_val_speech, len_in_samples, self.fs, train_flag=False, low_snr_weight=1.0)\n",
                     "        dataset_val = generator_val.tf_data_set.batch(self.batchsize, drop_remainder=True).repeat()\n",
                     "        steps_val = generator_val.total_samples // self.batchsize\n",
                     "\n",
-                    "        print(f\"Starting training for {self.max_epochs} max epochs...\")\n",
+                    "        print(f\"Training target: {self.max_epochs} epochs. Steps per epoch: {steps_train}\")\n",
                     "        self.model.fit(\n",
                     "            x=dataset,\n",
                     "            steps_per_epoch=steps_train,\n",
                     "            epochs=self.max_epochs,\n",
+                    "            initial_epoch=initial_epoch,\n",
                     "            verbose=1,\n",
                     "            validation_data=dataset_val,\n",
                     "            validation_steps=steps_val,\n",
-                    "            callbacks=[checkpointer, reduce_lr, csv_logger, early_stopping]\n",
+                    "            callbacks=[best_checkpointer, epoch_checkpointer, reduce_lr, csv_logger, early_stopping]\n",
                     "        )\n",
                     "        tf.keras.backend.clear_session()\n",
-                    "        print(f\"SUCCESS: Checkpoint saved persistently to Google Drive: '{weights_file_path}'\")"
+                    "        print(f\"SUCCESS: Training completed/stopped! Best weights saved to: '{best_weights_path}'\")"
                 ]
             },
             {
                 "cell_type": "markdown",
                 "metadata": {},
                 "source": [
-                    "## Cell 6: Execute Full Training Run (256-Unit Model)"
+                    "## Cell 6: Execute 384-Unit Training Run"
                 ]
             },
             {
@@ -336,26 +388,24 @@ def create_colab_notebook():
                     "path_train_speech = '/content/data_full/train_speech'\n",
                     "path_val_mix = '/content/data_full/val_mix'\n",
                     "path_val_speech = '/content/data_full/val_speech'\n",
-                    "drive_save_dir = '/content/drive/MyDrive/DTLN/models_full_run'\n",
+                    "drive_save_dir = '/content/drive/MyDrive/SIH2026_DTLN/models_384_run'\n",
                     "\n",
-                    "run_name = 'full_run_256'\n",
+                    "run_name = '384_run'\n",
                     "\n",
                     "model_trainer = DTLN_model()\n",
-                    "model_trainer.numUnits = 256\n",
+                    "model_trainer.numUnits = 384\n",
                     "model_trainer.numLayer = 1\n",
                     "model_trainer.max_epochs = 80\n",
                     "model_trainer.batchsize = 16\n",
-                    "model_trainer.cost_function = model_trainer.snr_cost\n",
                     "\n",
-                    "print(\"=== Starting DTLN 256-Unit GPU Training ===\")\n",
+                    "print(\"=== Starting Resumable DTLN 384-Unit GPU Training ===\")\n",
                     "print(f\"  LSTM Units (`numUnits`): {model_trainer.numUnits}\")\n",
                     "print(f\"  LSTM Layers (`numLayer`): {model_trainer.numLayer}\")\n",
                     "print(f\"  Max Epoch Budget:       {model_trainer.max_epochs}\")\n",
                     "print(f\"  Batch Size:             {model_trainer.batchsize}\")\n",
-                    "print(f\"  Loss Function:          {model_trainer.cost_function.__name__} (SI-SNR Loss)\")\n",
-                    "print(f\"  Save Path (Drive):      {drive_save_dir}\")\n",
+                    "print(f\"  Drive Output Dir:       {drive_save_dir}\")\n",
                     "\n",
-                    "print(\"\\nBuilding model...\")\n",
+                    "print(\"\\nBuilding 384-unit DTLN model...\")\n",
                     "model_trainer.build_DTLN_model()\n",
                     "model_trainer.compile_model()\n",
                     "\n",
@@ -369,7 +419,7 @@ def create_colab_notebook():
                     "    drive_save_dir\n",
                     ")\n",
                     "elapsed = time.time() - start_t\n",
-                    "print(f\"\\n=== GPU Training Completed in {elapsed / 60.0:.2f} minutes ===\")"
+                    "print(f\"\\n=== Training execution finished in {elapsed / 60.0:.2f} minutes ===\")"
                 ]
             },
             {
@@ -385,26 +435,32 @@ def create_colab_notebook():
                 "metadata": {},
                 "outputs": [],
                 "source": [
-                    "import os\n",
+                    "import os, glob\n",
                     "\n",
-                    "drive_weights = '/content/drive/MyDrive/DTLN/models_full_run/full_run_256.weights.h5'\n",
-                    "drive_log = '/content/drive/MyDrive/DTLN/models_full_run/training_full_run_256.log'\n",
+                    "drive_save_dir = '/content/drive/MyDrive/SIH2026_DTLN/models_384_run'\n",
+                    "drive_weights = os.path.join(drive_save_dir, '384_run.weights.h5')\n",
+                    "drive_log = os.path.join(drive_save_dir, 'training_384_run.log')\n",
+                    "checkpoint_dir = os.path.join(drive_save_dir, 'checkpoints')\n",
                     "\n",
-                    "print(\"=== Google Drive Checkpoint Verification ===\")\n",
+                    "print(\"=== Google Drive Persistence Verification ===\")\n",
                     "if os.path.exists(drive_weights):\n",
-                    "    print(f\"SUCCESS: Trained Weights file found at: '{drive_weights}' ({os.path.getsize(drive_weights)} bytes)\")\n",
+                    "    print(f\"SUCCESS: Best Weights file found at: '{drive_weights}' ({os.path.getsize(drive_weights)} bytes)\")\n",
                     "else:\n",
-                    "    print(f\"WARNING: Weights file not found at '{drive_weights}'!\")\n",
+                    "    print(f\"INFO: Best Weights file not yet written (saved when val_loss improves).\")\n",
+                    "\n",
+                    "if os.path.exists(checkpoint_dir):\n",
+                    "    ckpts = glob.glob(os.path.join(checkpoint_dir, 'epoch_*.weights.h5'))\n",
+                    "    print(f\"SUCCESS: Found {len(ckpts)} per-epoch checkpoint files in '{checkpoint_dir}'\")\n",
+                    "    if ckpts:\n",
+                    "        print(f\"  Latest checkpoint: {os.path.basename(sorted(ckpts)[-1])}\")\n",
                     "\n",
                     "if os.path.exists(drive_log):\n",
-                    "    print(f\"SUCCESS: Training log file found at: '{drive_log}'\")\n",
-                    "    print(\"\\nLast 10 Epoch Log entries:\")\n",
+                    "    print(f\"\\nSUCCESS: Training log file found at: '{drive_log}'\")\n",
+                    "    print(\"Last 10 Log Entries:\")\n",
                     "    with open(drive_log, 'r') as f:\n",
                     "        lines = f.readlines()\n",
                     "        for line in lines[-10:]:\n",
-                    "            print(\"  \", line.strip())\n",
-                    "else:\n",
-                    "    print(f\"WARNING: Training log file not found at '{drive_log}'!\")"
+                    "            print(\"  \", line.strip())"
                 ]
             }
         ],
