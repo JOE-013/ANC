@@ -26,7 +26,7 @@ An end-to-end real-time speech enhancement and active noise cancellation (ANC) p
 ### 1. Raspberry Pi 5 Measured Performance 
 
 | Metric | Overall Performance |
-| :--- | :--- | :--- |
+| :--- | :--- |
 | **SI-SNR Improvement** | **+12.89 dB Gain** |
 | **STOI** | **0.8805** |
 | **PESQ** | **1.952** |
