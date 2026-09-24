@@ -23,16 +23,16 @@ An end-to-end real-time speech enhancement and active noise cancellation (ANC) p
 
 ## 📊 Benchmark Results
 
-### 1. Raspberry Pi 5 Measured Performance (Babble-Tuned Model)
+### 1. Raspberry Pi 5 Measured Performance 
 
-| Metric | Overall Performance | Notes |
+| Metric | Overall Performance |
 | :--- | :--- | :--- |
-| **SI-SNR Improvement** | **+12.89 dB Gain** | Tested on matched 120-file evaluation subset |
-| **STOI** | **0.8805** | High objective speech intelligibility |
-| **Babble SI-SNR Gain** | **+14.10 dB Gain** | Highly effective on complex human background noise |
-| **Avg Block Latency** | **~0.88 ms / block** | 7.12 ms headroom (vs 8.0 ms budget) |
-| **Real-Time Factor (RTF)**| **0.11x** | **9x Faster than Real-Time** |
-| **CPU Headroom** | **89%** | Remaining CPU capacity per 8ms frame |
+| **SI-SNR Improvement** | **+12.89 dB Gain** |
+| **STOI** | **0.8805** |
+| **PESQ** | **1.952** |
+| **Avg Block Latency** | **~0.88 ms / block** | 
+| **Real-Time Factor (RTF)**| **0.11x** | 
+
 
 ---
 
